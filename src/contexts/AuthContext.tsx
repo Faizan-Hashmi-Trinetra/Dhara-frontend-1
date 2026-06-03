@@ -18,6 +18,7 @@ interface AuthContextType {
   verifyEmail: (token: string) => Promise<void>;
   forgotPassword: (email: string) => Promise<void>;
   resetPassword: (token: string, newPassword: string) => Promise<void>;
+  refreshToken: () => Promise<boolean>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -93,6 +94,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [token, fetchSessions]);
 
+  const refreshToken = useCallback(async (): Promise<boolean> => {
+    const rt = localStorage.getItem("refresh_token");
+    if (!rt) return false;
+    try {
+      const response = await fetch(buildApiUrl("/auth/refresh"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+      if (!response.ok) return false;
+      const data = await response.json();
+      setToken(data.access_token);
+      setUser(data.user);
+      localStorage.setItem("access_token", data.access_token);
+      if (data.refresh_token) {
+        localStorage.setItem("refresh_token", data.refresh_token);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const fetchUser = async (authToken: string) => {
     try {
       const response = await fetch(buildApiUrl("/auth/me"), {
@@ -101,12 +125,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
+      } else if (response.status === 401) {
+        const refreshed = await refreshToken();
+        if (refreshed) {
+          const newToken = localStorage.getItem("access_token");
+          if (newToken) {
+            const retryResponse = await fetch(buildApiUrl("/auth/me"), {
+              headers: { Authorization: `Bearer ${newToken}` },
+            });
+            if (retryResponse.ok) {
+              const userData = await retryResponse.json();
+              setUser(userData);
+              return;
+            }
+          }
+        }
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        setToken(null);
       } else {
         localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
         setToken(null);
       }
     } catch {
       localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
       setToken(null);
     } finally {
       setIsLoading(false);
@@ -126,13 +170,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const data = await response.json();
-    if (data.requires_verification) {
-      throw new Error("Please verify your email first. Check your inbox for the verification link.");
-    }
 
     setToken(data.access_token);
     setUser(data.user);
     localStorage.setItem("access_token", data.access_token);
+    if (data.refresh_token) {
+      localStorage.setItem("refresh_token", data.refresh_token);
+    }
   }, []);
 
   const register = useCallback(async (email: string, password: string, full_name: string) => {
@@ -153,6 +197,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
     setSessions([]);
     localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
     window.location.href = "/auth";
   }, []);
 
@@ -185,6 +230,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(data.access_token);
     setUser(data.user);
     localStorage.setItem("access_token", data.access_token);
+    if (data.refresh_token) {
+      localStorage.setItem("refresh_token", data.refresh_token);
+    }
   }, []);
 
   const verifyEmail = useCallback(async (token: string) => {
@@ -233,6 +281,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         verifyEmail,
         forgotPassword,
         resetPassword,
+        refreshToken,
       }}
     >
       {children}

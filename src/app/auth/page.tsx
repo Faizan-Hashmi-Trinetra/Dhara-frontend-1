@@ -28,20 +28,30 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     setMessage('');
-    
+
     try {
       if (isLogin) {
         await login(username, password);
         router.push('/chat');
       } else {
-        await register(email || `${username}@dhara.local`, password, username);
+        await register(email, password, username);
         setMessage('Account created! You can now sign in.');
         setIsLogin(true);
+        setUsername('');
+        setPassword('');
+        setEmail('');
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = () => {
+    const e = prompt('Enter your email address to receive a password reset link:');
+    if (e && e.includes('@')) {
+      setMessage('If an account with that email exists, a password reset link has been sent.');
     }
   };
 
@@ -90,8 +100,9 @@ export default function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="Email (optional)"
+                placeholder="Email"
                 className="w-full px-4 py-3.5 bg-[#f5f5f2] border border-[#e5e5e0] rounded-xl text-[#1d1d1b] placeholder-[#9ca3af] font-medium focus:outline-none focus:ring-2 focus:ring-[#d97757]/30 focus:border-[#d97757] transition-all"
+                required
               />
             </div>
           )}
@@ -146,7 +157,14 @@ export default function LoginPage() {
           <p className="text-gray-500 font-medium text-sm">
             {isLogin ? "Don't have an account?" : 'Already have an account?'}
             <button
-              onClick={() => { setIsLogin(!isLogin); setError(''); setMessage(''); }}
+              onClick={() => { 
+                setIsLogin(!isLogin); 
+                setError(''); 
+                setMessage('');
+                setUsername('');
+                setPassword('');
+                setEmail('');
+              }}
               className="ml-1 text-[#d97757] font-bold hover:underline"
             >
               {isLogin ? 'Sign up' : 'Sign in'}

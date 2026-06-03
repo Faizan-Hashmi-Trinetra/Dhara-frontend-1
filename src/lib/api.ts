@@ -66,17 +66,74 @@ function buildBody(body: unknown) {
   return body instanceof FormData ? body : JSON.stringify(body);
 }
 
+let isRefreshing = false;
+let refreshQueue: Array<(token: string) => void> = [];
+
+async function tryRefreshToken(): Promise<string | null> {
+  const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
+  if (!refreshToken) return null;
+
+  if (isRefreshing) {
+    return new Promise((resolve) => {
+      refreshQueue.push((token: string) => resolve(token));
+    });
+  }
+
+  isRefreshing = true;
+  try {
+    const response = await fetch(buildApiUrl("/auth/refresh"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!response.ok) {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      return null;
+    }
+    const data = await response.json();
+    localStorage.setItem("access_token", data.access_token);
+    if (data.refresh_token) {
+      localStorage.setItem("refresh_token", data.refresh_token);
+    }
+    refreshQueue.forEach((cb) => cb(data.access_token));
+    refreshQueue = [];
+    return data.access_token;
+  } catch {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    return null;
+  } finally {
+    isRefreshing = false;
+  }
+}
+
+async function fetchWithRefresh(url: string, options: RequestInit, retry = true): Promise<Response> {
+  const response = await fetch(url, options);
+
+  if (response.status === 401 && retry) {
+    const newToken = await tryRefreshToken();
+    if (newToken) {
+      const headers = new Headers(options.headers || {});
+      headers.set("Authorization", `Bearer ${newToken}`);
+      return fetch(url, { ...options, headers });
+    }
+  }
+
+  return response;
+}
+
 const api = {
   async get(url: string, headers: RequestHeaders = {}): Promise<ApiResponse> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const response = await fetch(buildApiUrl(url), {
+    const response = await fetchWithRefresh(buildApiUrl(url), {
       headers: buildHeaders(headers, token),
     });
     return parseResponse(response);
   },
   async post(url: string, body: unknown, headers: RequestHeaders = {}): Promise<ApiResponse> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const response = await fetch(buildApiUrl(url), {
+    const response = await fetchWithRefresh(buildApiUrl(url), {
       method: 'POST',
       headers: buildHeaders(headers, token, body),
       body: buildBody(body),
@@ -85,7 +142,7 @@ const api = {
   },
   async put(url: string, body: unknown, headers: RequestHeaders = {}): Promise<ApiResponse> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const response = await fetch(buildApiUrl(url), {
+    const response = await fetchWithRefresh(buildApiUrl(url), {
       method: 'PUT',
       headers: buildHeaders(headers, token, body),
       body: buildBody(body),
@@ -94,7 +151,7 @@ const api = {
   },
   async patch(url: string, body: unknown, headers: RequestHeaders = {}): Promise<ApiResponse> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const response = await fetch(buildApiUrl(url), {
+    const response = await fetchWithRefresh(buildApiUrl(url), {
       method: 'PATCH',
       headers: buildHeaders(headers, token, body),
       body: buildBody(body),
@@ -103,7 +160,7 @@ const api = {
   },
   async delete(url: string, headers: RequestHeaders = {}): Promise<ApiResponse> {
     const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-    const response = await fetch(buildApiUrl(url), {
+    const response = await fetchWithRefresh(buildApiUrl(url), {
       method: 'DELETE',
       headers: buildHeaders(headers, token),
     });
